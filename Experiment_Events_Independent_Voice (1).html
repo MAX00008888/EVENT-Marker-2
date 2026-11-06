@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Driving Experiment Event Logger</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#eef2f6;color:#172b40;font-family:system-ui,-apple-system,sans-serif;padding:24px; padding-top:max(24px,env(safe-area-inset-top))}main{max-width:1050px;margin:auto}h1{font-size:28px;margin:0 0 8px}.sub{color:#53677c;line-height:1.6}section{background:white;border:1px solid #dce4ec;border-radius:16px;padding:20px;margin-top:20px}.toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center}label{display:flex;align-items:center;gap:8px}input{width:150px;padding:12px;border:1px solid #bbc8d5;border-radius:8px;font:inherit}button{font:inherit;cursor:pointer;border:1px solid #bbcad8;border-radius:9px;padding:12px 18px;background:white;color:#172b40;touch-action:manipulation}button:disabled{opacity:.35;cursor:default}.events{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.event{padding:24px 12px;text-align:left;min-height:125px;background:#edf4fc;border:2px solid #c9dcef}.event strong{display:block;font-size:21px;margin:12px 0 6px}.event small{font-size:14px}.event.next{border-color:#1c65ae;background:#e2f0ff}.event.done{background:#eef8f2;border-color:#b8dcc5}#tor{background:#fff0ed;border-color:#d88b7d}#takeover{background:#e8f7f0;border-color:#70b798}#live{font-size:22px;font-variant-numeric:tabular-nums;margin:14px 0}#status{min-height:24px;font-weight:600}#audioStatus{color:#765300}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;white-space:nowrap}th,td{padding:12px 10px;border-bottom:1px solid #e1e7ee;text-align:left}th{color:#52677e}#reaction{font-size:22px;color:#176745;margin-top:16px}.note{font-size:13px;color:#53677c;line-height:1.6}@media(max-width:650px){body{padding:12px}.events{grid-template-columns:1fr 1fr}.event strong{font-size:18px}h1{font-size:23px}}
+</style>
+</head>
+<body><main>
+<h1>Driving Experiment · Event Logger</h1>
+<div class="sub">Six ordered event markers and three independent voice announcements. Timestamps use America/Toronto with automatic daylight saving time adjustment.</div>
+<section>
+<div class="toolbar"><label>Participant ID <input id="participant" value="P001" maxlength="80"></label><label>Scenario ID <input id="scenario" value="S01" maxlength="80"></label><button id="testSound">Test alarm</button><button id="mute">Stop alarm</button><button id="testVoice">Test voice</button><button id="replayVoice">Repeat last voice</button><button id="stopVoice">Stop voice</button></div>
+<div id="live"></div><div id="status" role="status" aria-live="polite">Ready. Use a voice announcement or tap Scene start.</div><div id="audioStatus" role="status"></div><div id="voiceStatus" role="status" aria-live="polite"></div>
+</section>
+<section><h2>Voice announcements</h2><p class="sub">Independent buttons. Every click is timestamped without advancing the event sequence.</p><div class="events"><button class="event" id="experiment_start"><span>Voice · Click time recorded</span><strong>Start experiment</strong><small>The experiment is starting.</small></button><button class="event" id="autopilot_prompt"><span>Voice · Click time recorded</span><strong>Autopilot instruction</strong><small>Please activate autopilot.</small></button><button class="event" id="stop_vehicle_prompt"><span>Voice · Click time recorded</span><strong>Stop vehicle instruction</strong><small>Please stop the vehicle. The experiment is over.</small></button></div></section>
+<section><h2>Event markers</h2><div class="events">
+<button class="event" id="scene_start"><span>01</span><strong>Scene start</strong><small>Scene start</small></button>
+<button class="event" id="cruise_control"><span>02</span><strong>Activate Cruise Control</strong><small>Record cruise control activation</small></button>
+<button class="event" id="autopilot"><span>03</span><strong>Activate Autopilot</strong><small>Record autopilot activation</small></button>
+<button class="event" id="tor"><span>04 · Audible alarm</span><strong>TOR</strong><small>Issue takeover request</small></button>
+<button class="event" id="takeover"><span>05</span><strong>Takeover</strong><small>Record takeover · Stop alarm</small></button>
+<button class="event" id="experiment_end"><span>06</span><strong>End experiment</strong><small>Record experiment end</small></button>
+</div><div id="reaction"></div></section>
+<section><div class="toolbar"><button id="export" disabled>Export all records (CSV)</button><button id="newScene" disabled>Next scenario</button></div>
+<div class="table-wrap"><table><thead><tr><th>Scenario</th><th>Event</th><th>Toronto timestamp</th><th>Time since scene start / s</th></tr></thead><tbody id="log"></tbody></table></div>
+<p class="note">This page records the experimenter’s button clicks. The TOR timestamp marks the click; audible alarm onset may be delayed. The takeover interval is the time between manual markers. Export CSV after the experiment. Voice prompts use the device’s English speech voice. Voice-start timestamps are browser callbacks, not measured speaker onset. On iPhone, turn off Silent Mode and check media volume before testing the alarm.</p>
+</section></main>
+<script>
+'use strict';
+const STEPS=['scene_start', 'cruise_control', 'autopilot', 'tor', 'takeover', 'experiment_end'];
+const LABELS={experiment_start:'Start experiment',autopilot_prompt:'Autopilot instruction',stop_vehicle_prompt:'Stop vehicle instruction',scene_start:'Scene start',cruise_control:'Activate Cruise Control',autopilot:'Activate Autopilot',tor:'TOR',takeover:'Takeover',experiment_end:'End experiment'};
+const el=id=>document.getElementById(id);
+const fmt=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+function torontoTimestamp(date=new Date()){const p={};for(const part of fmt.formatToParts(date))p[part.type]=part.value;return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}.${String(date.getUTCMilliseconds()).padStart(3,'0')}`;}
+function clock(){const perf=performance.now(),date=new Date();return {perf,date};}
+let rows=[],step=0,scene=null,audio=null,alarmTimer=null,testTimer=null,voices=[],audioGeneration=0;
+const runId=Date.now()+'-'+Math.random().toString(36).slice(2,8);
+function update(){el('testVoice').disabled=step>0;el('testSound').disabled=step>0;STEPS.forEach((id,i)=>{el(id).disabled=i!==step;el(id).className='event'+(i<step?' done':i===step?' next':'');});el('export').disabled=!rows.length;el('newScene').disabled=!scene;el('participant').disabled=!!scene;el('scenario').disabled=!!scene;}
+const PROMPTS={experiment_start:'The experiment is starting.',autopilot_prompt:'Please activate autopilot.',stop_vehicle_prompt:'Please stop the vehicle. The experiment is over.',};
+let activeUtterance=null,lastPrompt='',lastSpeechRow=null;
+function stopSpeech(){
+  if(lastSpeechRow&&['requested','speaking'].includes(lastSpeechRow.speech_status))lastSpeechRow.speech_status='cancelled';
+  activeUtterance=null;lastSpeechRow=null;
+  if(window.speechSynthesis)window.speechSynthesis.cancel();
+}
+function speakPrompt(text,row=null){
+  stopSpeech();lastPrompt=text;lastSpeechRow=row;
+  if(row){row.speech_text=text;row.speech_status='requested';}
+  try{
+    if(!window.speechSynthesis||!window.SpeechSynthesisUtterance)throw new Error('Speech synthesis is unavailable');
+    const u=new window.SpeechSynthesisUtterance(text);activeUtterance=u;u.lang='en-US';u.rate=0.9;u.pitch=1;u.volume=1;
+    const voices=window.speechSynthesis.getVoices();const voice=voices.find(v=>v.lang==='en-US')||voices.find(v=>/^en[-_]/i.test(v.lang));if(voice)u.voice=voice;
+    el('voiceStatus').textContent='Voice requested: '+text;
+    u.onstart=()=>{if(activeUtterance!==u)return;const date=new Date();if(row){row.speech_status='speaking';row.speech_start_toronto=torontoTimestamp(date);row.speech_start_utc=date.toISOString();}el('voiceStatus').textContent='Speaking: '+text;};
+    u.onend=()=>{if(activeUtterance!==u)return;if(row)row.speech_status='completed';activeUtterance=null;lastSpeechRow=null;el('voiceStatus').textContent='Voice finished: '+text;};
+    u.onerror=event=>{if(activeUtterance!==u)return;if(row){row.speech_status='error';row.speech_error=event.error||'unknown';}activeUtterance=null;lastSpeechRow=null;el('voiceStatus').textContent='Voice failed: '+(event.error||'unknown')+'. Check device audio and tap Repeat last voice.';};
+    window.speechSynthesis.speak(u);
+  }catch(error){if(row){row.speech_status='error';row.speech_error=error.message;}activeUtterance=null;lastSpeechRow=null;el('voiceStatus').textContent='Voice failed: '+error.message;}
+}
+el('testVoice').addEventListener('click',()=>speakPrompt('Voice test. Please check the speaker volume.'));
+el('replayVoice').addEventListener('click',()=>{const id=Object.keys(PROMPTS).find(key=>PROMPTS[key]===lastPrompt);if(id)record(id);else if(lastPrompt)speakPrompt(lastPrompt);});
+el('stopVoice').addEventListener('click',()=>{stopSpeech();el('voiceStatus').textContent='Voice stopped.';});
+function beep(){
+  if(!audio||audio.state!=='running')return;
+  const osc=audio.createOscillator(),gain=audio.createGain(),t=audio.currentTime;
+  osc.type='sine';osc.frequency.setValueAtTime(880,t);gain.gain.setValueAtTime(0,t);gain.gain.linearRampToValueAtTime(.15,t+.015);gain.gain.setValueAtTime(.15,t+.22);gain.gain.linearRampToValueAtTime(0,t+.25);
+  osc.connect(gain);gain.connect(audio.destination);voices.push(osc);osc.onended=()=>{voices=voices.filter(v=>v!==osc);osc.disconnect();gain.disconnect();};osc.start(t);osc.stop(t+.26);
+}
+function stopAlarm(){audioGeneration++;clearInterval(alarmTimer);alarmTimer=null;clearTimeout(testTimer);testTimer=null;for(const v of voices){try{v.stop();}catch(_){}}voices=[];}
+async function startAlarm(){
+  stopAlarm();const generation=audioGeneration;
+  try{
+    const AudioCtor=window.AudioContext||window.webkitAudioContext;if(!AudioCtor)throw new Error('This browser does not support Web Audio');
+    if(!audio)audio=new AudioCtor();await audio.resume();
+    // Takeover may have been marked while the audio context was resuming.
+    if(generation!==audioGeneration)return;
+    if(audio.state!=='running')throw new Error('Audio did not start');
+    beep();alarmTimer=setInterval(beep,600);el('audioStatus').textContent='Alarm started. Check device volume.';
+  }catch(error){el('audioStatus').textContent='Alarm could not start: '+error.message+'. The event timestamp has still been recorded.';}
+}
+function record(id){
+  const independent=Object.prototype.hasOwnProperty.call(PROMPTS,id);
+  if(!independent&&STEPS[step]!==id)return;
+  const stamp=clock();
+  if(!scene){
+    const participant=el('participant').value.trim(),scenario=el('scenario').value.trim();
+    if(!participant||!scenario){el('status').textContent='Enter Participant ID and Scenario ID.';return;}
+    scene={participant,scenario,key:Date.now()+'-'+Math.random().toString(36).slice(2,8),start:stamp.perf,sceneStart:null,tor:null};el('reaction').textContent='';el('audioStatus').textContent='';
+  }
+  if(id==='scene_start')scene.sceneStart=stamp.perf;
+  if(id==='tor')scene.tor=stamp.perf;
+  const interval=id==='takeover'?stamp.perf-scene.tor:'';
+  rows.push({run_id:runId,scene_instance_id:scene.key,participant_id:scene.participant,scenario_id:scene.scenario,event:id,event_label:LABELS[id],record_type:independent?'voice_click':'event_marker',timestamp_toronto:torontoTimestamp(stamp.date),timestamp_utc:stamp.date.toISOString(),epoch_ms:stamp.date.getTime(),performance_ms:stamp.perf.toFixed(3),performance_time_origin_ms:performance.timeOrigin,elapsed_scene_ms:scene.sceneStart===null?'':(stamp.perf-scene.sceneStart).toFixed(3),elapsed_recording_ms:(stamp.perf-scene.start).toFixed(3),tor_to_takeover_marker_ms:interval===''?'':interval.toFixed(3),timezone:'America/Toronto',speech_text:'',speech_status:'',speech_start_toronto:'',speech_start_utc:'',speech_error:''});
+  const row=rows[rows.length-1],tr=document.createElement('tr');for(const value of [row.scenario_id,row.event_label,row.timestamp_toronto,row.elapsed_scene_ms===''?'—':(Number(row.elapsed_scene_ms)/1000).toFixed(3)]){const td=document.createElement('td');td.textContent=value;tr.appendChild(td);}el('log').appendChild(tr);
+  if(!independent)step++;update();el('status').textContent=independent?`Voice click recorded: ${LABELS[id]}. Event sequence unchanged.`:step===STEPS.length?'Experiment end recorded. Export CSV or start the next scenario.':`Recorded: ${LABELS[id]}. Next: ${LABELS[STEPS[step]]}.`;
+  if(id==='tor'){stopSpeech();startAlarm();}
+  if(id==='experiment_end'){stopAlarm();el('audioStatus').textContent='Alarm stopped.';}
+  if(independent)speakPrompt(PROMPTS[id],row);
+  if(id==='takeover'){stopAlarm();el('audioStatus').textContent='Alarm stopped.';el('reaction').textContent=`TOR → Takeover marker interval: ${interval.toFixed(1)} ms (${(interval/1000).toFixed(3)} s)`;}
+}
+[...STEPS,...Object.keys(PROMPTS)].forEach(id=>el(id).addEventListener('click',()=>record(id)));
+el('testSound').addEventListener('click',async()=>{if(alarmTimer){el('audioStatus').textContent='Alarm is already playing.';return;}await startAlarm();testTimer=setTimeout(()=>{stopAlarm();el('audioStatus').textContent='Alarm test finished.';},1800);});
+el('mute').addEventListener('click',()=>{stopAlarm();el('audioStatus').textContent='Alarm stopped manually. Takeover has not been recorded.';});
+el('newScene').addEventListener('click',()=>{
+  if(step>0&&step<STEPS.length&&!confirm('This scenario is incomplete. Start the next scenario? Existing records will be kept.'))return;
+  stopAlarm();stopSpeech();step=0;scene=null;const match=el('scenario').value.match(/^(.*?)(\d+)$/);if(match)el('scenario').value=match[1]+String(Number(match[2])+1).padStart(match[2].length,'0');el('status').textContent='Ready. Use a voice announcement or tap Scene start.';el('reaction').textContent='';el('audioStatus').textContent='';el('voiceStatus').textContent='';lastPrompt='';update();
+});
+const columns=['run_id','scene_instance_id','participant_id','scenario_id','event','event_label','record_type','timestamp_toronto','timestamp_utc','epoch_ms','performance_ms','performance_time_origin_ms','elapsed_scene_ms','elapsed_recording_ms','tor_to_takeover_marker_ms','timezone','speech_text','speech_status','speech_start_toronto','speech_start_utc','speech_error'];
+function csvCell(value){return '"'+String(value??'').replace(/"/g,'""')+'"';}
+function csvText(){return '\uFEFF'+[columns.map(csvCell).join(','),...rows.map(r=>columns.map(k=>csvCell(r[k])).join(','))].join('\r\n');}
+el('export').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([csvText()],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='Driving_Events_'+runId+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);});
+function tick(){el('live').textContent=torontoTimestamp();}tick();setInterval(tick,100);
+window.addEventListener('pagehide',()=>{stopAlarm();stopSpeech();});
+window.addEventListener('beforeunload',event=>{if(rows.length){event.preventDefault();event.returnValue='';}});
+update();
+</script></body></html>
